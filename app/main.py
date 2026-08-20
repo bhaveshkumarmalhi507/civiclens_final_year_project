@@ -4,7 +4,12 @@ from app.database.database import engine
 from app.database.database import Base, engine
 from app.models import User
 from app.routers.user import router as user_router
+from fastapi.security import OAuth2PasswordBearer
 
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="users/login"
+)
 
 app = FastAPI(
     title="CivicLens API",
