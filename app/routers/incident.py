@@ -7,6 +7,7 @@ from app.models.incident import Incident
 from app.models.user import User
 from app.schemas.incident import IncidentCreate, IncidentResponse
 from app.routers.user import get_current_user
+from typing import List
 
 router = APIRouter(
     prefix="/incidents",
@@ -29,6 +30,18 @@ def create_incident(
         location=point,
         status="Submitted"
     )
+
+@router.get("/", response_model=List[IncidentResponse])
+def list_incidents(db: Session = Depends(get_db)):
+    incidents = db.query(Incident).order_by(Incident.created_at.desc()).all()
+    return incidents
+
+@router.get("/{incident_id}", response_model=IncidentResponse)
+def get_incident(incident_id: int, db: Session = Depends(get_db)):
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
 
     db.add(new_incident)
     db.commit()
