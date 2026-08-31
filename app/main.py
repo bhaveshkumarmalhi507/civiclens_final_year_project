@@ -2,10 +2,10 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from app.database.database import engine
 from app.database.database import Base, engine
-from app.models import User
+from app.models import User, Incident
 from app.routers.user import router as user_router
 from fastapi.security import OAuth2PasswordBearer
-
+from app.routers.incident import router as incident_router
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="users/login"
@@ -21,7 +21,7 @@ app = FastAPI(
 Base.metadata.create_all(bind=engine)
 
 app.include_router(user_router)
-
+app.include_router(incident_router)
 @app.get("/")
 def home():
     try:
