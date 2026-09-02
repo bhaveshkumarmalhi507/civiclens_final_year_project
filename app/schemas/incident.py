@@ -31,3 +31,7 @@ class IncidentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class StatusUpdate(BaseModel):
+    new_status: str
+    note: str | None = None

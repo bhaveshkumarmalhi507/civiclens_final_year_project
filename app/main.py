@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from app.database.database import engine
 from app.database.database import Base, engine
-from app.models import User, Incident
+from app.models import User, Incident, StatusHistory
 from app.routers.user import router as user_router
 from fastapi.security import OAuth2PasswordBearer
 from app.routers.incident import router as incident_router

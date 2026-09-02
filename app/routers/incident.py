@@ -4,18 +4,20 @@ from sqlalchemy import func, cast
 from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_MakePoint, ST_SetSRID, ST_DWithin
 from typing import List
+from pydantic import BaseModel
 
 from app.database.database import get_db
 from app.models.incident import Incident
 from app.models.user import User
-from app.schemas.incident import IncidentCreate, IncidentResponse
+from app.schemas.incident import IncidentCreate, IncidentResponse, StatusUpdate
 from app.routers.user import get_current_user
 from app.utils.geocoding import get_area_name
+from app.models.status_history import StatusHistory
+
 router = APIRouter(
     prefix="/incidents",
     tags=["Incidents"]
 )
-
 
 @router.post("/", response_model=IncidentResponse)
 def create_incident(
@@ -86,4 +88,42 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
+
+
+VALID_STATUSES = ["Submitted", "Under Review", "Verified", "In Progress", "Resolved"]
+
+
+@router.patch("/{incident_id}/status", response_model=IncidentResponse)
+def update_status(
+    incident_id: int,
+    payload: StatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role not in ("admin", "moderator"):
+        raise HTTPException(status_code=403, detail="Only admin or moderator can update status")
+
+    if payload.new_status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {VALID_STATUSES}")
+
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    old_status = incident.status
+    incident.status = payload.new_status
+
+    history_entry = StatusHistory(
+        incident_id=incident.id,
+        old_status=old_status,
+        new_status=payload.new_status,
+        changed_by=current_user.id,
+        note=payload.note
+    )
+
+    db.add(history_entry)
+    db.commit()
+    db.refresh(incident)
+
     return incident
