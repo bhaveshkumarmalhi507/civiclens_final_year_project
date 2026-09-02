@@ -4,14 +4,14 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.user import User
-from app.schemas.user import UserRegister, UserResponse, UserLogin, TokenResponse
+from app.schemas.user import UserRegister, UserResponse, UserLogin, TokenResponse, PreferenceUpdate, PreferenceResponse
 from app.auth.security import(
     hash_password,
     verify_password,
     create_access_token,
     decode_access_token
     )
-
+from app.models.preference import UserPreference
 
 router = APIRouter(
     prefix="/users",
@@ -156,3 +156,45 @@ def get_my_profile(
     current_user: User = Depends(get_current_user)
 ):
     return current_user
+
+
+@router.post("/preferences", response_model=PreferenceResponse)
+def set_preferences(
+    payload: PreferenceUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    existing = db.query(UserPreference).filter(
+        UserPreference.user_id == current_user.id
+    ).first()
+
+    if existing:
+        existing.preferred_areas = payload.preferred_areas
+        existing.preferred_categories = payload.preferred_categories
+    else:
+        existing = UserPreference(
+            user_id=current_user.id,
+            preferred_areas=payload.preferred_areas,
+            preferred_categories=payload.preferred_categories
+        )
+        db.add(existing)
+
+    db.commit()
+    db.refresh(existing)
+
+    return existing
+
+
+@router.get("/preferences", response_model=PreferenceResponse)
+def get_preferences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    prefs = db.query(UserPreference).filter(
+        UserPreference.user_id == current_user.id
+    ).first()
+
+    if not prefs:
+        return PreferenceResponse(preferred_areas=[], preferred_categories=[])
+
+    return prefs

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-
+from typing import List
 
 class UserRegister(BaseModel):
     full_name: str
@@ -26,3 +26,15 @@ class UserLogin(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+class PreferenceUpdate(BaseModel):
+    preferred_areas: List[str] = []
+    preferred_categories: List[str] = []
+
+
+class PreferenceResponse(BaseModel):
+    preferred_areas: List[str]
+    preferred_categories: List[str]
+
+    class Config:
+        from_attributes = True
