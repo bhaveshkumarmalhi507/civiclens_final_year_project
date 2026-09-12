@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from geoalchemy2 import Geometry
 from datetime import datetime
 
@@ -27,3 +27,6 @@ class Incident(Base):
     status = Column(String(30), default="Submitted")       # FR-11: Submitted -> Verified -> Resolved
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    ai_confidence = Column(Integer, nullable=True)   # 0-100, AI se aayega
+    is_flagged = Column(Boolean, default=False)      # low confidence par True ho jayega
