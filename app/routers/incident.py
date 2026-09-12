@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast
 from geoalchemy2 import Geography
@@ -13,6 +13,7 @@ from app.schemas.incident import IncidentCreate, IncidentResponse, StatusUpdate
 from app.routers.user import get_current_user
 from app.utils.geocoding import get_area_name
 from app.models.status_history import StatusHistory
+from app.websocket.manager import manager
 
 router = APIRouter(
     prefix="/incidents",
@@ -20,7 +21,7 @@ router = APIRouter(
 )
 
 @router.post("/", response_model=IncidentResponse)
-def create_incident(
+async def create_incident(
     incident: IncidentCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -73,6 +74,16 @@ def create_incident(
 
         db.commit()
         db.refresh(new_incident)
+        
+        # ===== Real-time Broadcast (FR-08) =====
+    await manager.broadcast({
+        "id": new_incident.id,
+        "description": new_incident.description,
+        "category": new_incident.category,
+        "area_name": new_incident.area_name,
+        "status": new_incident.status,
+        "created_at": new_incident.created_at.isoformat()
+    })
 
     return new_incident
 
@@ -127,3 +138,13 @@ def update_status(
     db.refresh(incident)
 
     return incident
+
+
+@router.websocket("/ws/feed")
+async def websocket_feed(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()   # client se kuch aaye to bas sunte raho (abhi kuch use nahi karna)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
