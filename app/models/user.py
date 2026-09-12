@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from datetime import datetime
 
 from app.database.database import Base
@@ -24,3 +24,7 @@ class User(Base):
     profile_image = Column(String(255), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    fcm_token = Column(String, nullable=True)
+
+    is_active = Column(Boolean, default=True)

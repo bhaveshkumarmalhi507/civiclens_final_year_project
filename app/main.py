@@ -6,7 +6,8 @@ from app.models import User, Incident, StatusHistory, UserPreference
 from app.routers.user import router as user_router
 from fastapi.security import OAuth2PasswordBearer
 from app.routers.incident import router as incident_router
-
+from app.firebase import firebase_config  # Ensure Firebase is initialized
+from app.routers.admin import router as admin_router
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="users/login"
 )
@@ -22,6 +23,8 @@ Base.metadata.create_all(bind=engine)
 
 app.include_router(user_router)
 app.include_router(incident_router)
+app.include_router(admin_router)
+
 @app.get("/")
 def home():
     try:

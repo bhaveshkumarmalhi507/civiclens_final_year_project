@@ -12,6 +12,7 @@ from app.auth.security import(
     decode_access_token
     )
 from app.models.preference import UserPreference
+from app.schemas.user import FCMTokenUpdate
 
 router = APIRouter(
     prefix="/users",
@@ -184,7 +185,9 @@ def set_preferences(
 
     return existing
 
-
+#===================
+# Get User Preferences
+#===================
 @router.get("/preferences", response_model=PreferenceResponse)
 def get_preferences(
     db: Session = Depends(get_db),
@@ -198,3 +201,17 @@ def get_preferences(
         return PreferenceResponse(preferred_areas=[], preferred_categories=[])
 
     return prefs
+
+#===================
+# Update FCM Token
+#===================
+
+@router.post("/fcm-token")
+def update_fcm_token(
+    payload: FCMTokenUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    current_user.fcm_token = payload.fcm_token
+    db.commit()
+    return {"message": "FCM token updated successfully"}
