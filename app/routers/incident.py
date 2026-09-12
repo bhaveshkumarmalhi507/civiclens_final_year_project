@@ -5,6 +5,7 @@ from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_MakePoint, ST_SetSRID, ST_DWithin
 from typing import List
 from pydantic import BaseModel
+from app.services.priority_engine import calculate_priority_score
 
 from app.database.database import get_db
 from app.models.incident import Incident
@@ -75,6 +76,23 @@ async def create_incident(
 
         for inc in matching_incidents:
             inc.status = "Verified"
+
+        db.commit()
+        db.refresh(new_incident)
+
+            # ===== Priority Score Calculate Karo (FR-07) =====
+        DUMMY_SEVERITY = 50   # TODO: Asadullah ka real NLP severity yahan aayega
+
+        score, tier = calculate_priority_score(
+            severity_score=DUMMY_SEVERITY,
+            area_report_count=len(matching_incidents),
+            confirmation_count=distinct_users_count,
+            created_at=new_incident.created_at
+        )
+
+        for inc in matching_incidents:
+            inc.priority_score = score
+            inc.priority_tier = tier
 
         db.commit()
         db.refresh(new_incident)

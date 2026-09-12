@@ -26,6 +26,7 @@ class IncidentResponse(BaseModel):
     category: str | None
     area_name: str | None
     status: str
+    priority_score: int | None
     priority_tier: str | None
     created_at: datetime
 
