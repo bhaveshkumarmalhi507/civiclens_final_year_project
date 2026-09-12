@@ -14,6 +14,10 @@ from app.routers.user import get_current_user
 from app.utils.geocoding import get_area_name
 from app.models.status_history import StatusHistory
 from app.websocket.manager import manager
+from fastapi import UploadFile, File, Form
+import os
+import uuid
+import shutil
 
 router = APIRouter(
     prefix="/incidents",
@@ -148,3 +152,82 @@ async def websocket_feed(websocket: WebSocket):
             await websocket.receive_text()   # client se kuch aaye to bas sunte raho (abhi kuch use nahi karna)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+#==================
+# Incident Upload with Image
+#==================
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@router.post("/upload", response_model=IncidentResponse)
+async def create_incident_with_image(
+    description: str = Form(...),
+    category: str = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # ===== Image Save Karo =====
+    file_extension = image.filename.split(".")[-1]
+    unique_filename = f"{uuid.uuid4()}.{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+
+    # ===== Baaki Sab Wahi Purana Logic =====
+    point = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+    area_name = get_area_name(latitude, longitude)
+
+    new_incident = Incident(
+        user_id=current_user.id,
+        description=description,
+        category=category,
+        location=point,
+        area_name=area_name,
+        image_url=file_path,
+        status="Submitted"
+    )
+
+    db.add(new_incident)
+    db.commit()
+    db.refresh(new_incident)
+
+    # Community Validation
+    distinct_users_count = (
+        db.query(func.count(func.distinct(Incident.user_id)))
+        .filter(
+            Incident.category == new_incident.category,
+            ST_DWithin(cast(Incident.location, Geography), cast(point, Geography), 500)
+        )
+        .scalar()
+    )
+
+    if distinct_users_count >= 3:
+        matching_incidents = (
+            db.query(Incident)
+            .filter(
+                Incident.category == new_incident.category,
+                ST_DWithin(cast(Incident.location, Geography), cast(point, Geography), 500)
+            )
+            .all()
+        )
+        for inc in matching_incidents:
+            inc.status = "Verified"
+        db.commit()
+        db.refresh(new_incident)
+
+    await manager.broadcast({
+        "id": new_incident.id,
+        "description": new_incident.description,
+        "category": new_incident.category,
+        "area_name": new_incident.area_name,
+        "status": new_incident.status,
+        "created_at": new_incident.created_at.isoformat()
+    })
+
+    return new_incident
