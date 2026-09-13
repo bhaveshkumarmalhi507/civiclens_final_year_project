@@ -115,7 +115,25 @@ def list_incidents(db: Session = Depends(get_db)):
     incidents = db.query(Incident).order_by(Incident.created_at.desc()).all()
     return incidents
 
+#=========================
+#my-reports endpoint for users to see their own reports
+#=========================
+@router.get("/my-reports", response_model=List[IncidentResponse])
+def get_my_reports(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    incidents = (
+        db.query(Incident)
+        .filter(Incident.user_id == current_user.id)
+        .order_by(Incident.created_at.desc())
+        .all()
+    )
+    return incidents
 
+#=========================
+# Incident Status Update & History
+#=========================
 @router.get("/{incident_id}", response_model=IncidentResponse)
 def get_incident(incident_id: int, db: Session = Depends(get_db)):
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
@@ -185,19 +203,29 @@ async def create_incident_with_image(
     category: str = Form(...),
     latitude: float = Form(...),
     longitude: float = Form(...),
-    image: UploadFile = File(...),
+    image: UploadFile = File(None),
+    video: UploadFile = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # ===== Image Save Karo =====
-    file_extension = image.filename.split(".")[-1]
-    unique_filename = f"{uuid.uuid4()}.{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    if not image and not video:
+        raise HTTPException(status_code=400, detail="At least one of image or video is required")
 
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
+    image_path = None
+    video_path = None
 
-    # ===== Baaki Sab Wahi Purana Logic =====
+    if image:
+        ext = image.filename.split(".")[-1]
+        image_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.{ext}")
+        with open(image_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+
+    if video:
+        ext = video.filename.split(".")[-1]
+        video_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.{ext}")
+        with open(video_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+
     point = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
     area_name = get_area_name(latitude, longitude)
 
@@ -207,7 +235,8 @@ async def create_incident_with_image(
         category=category,
         location=point,
         area_name=area_name,
-        image_url=file_path,
+        image_url=image_path,
+        video_url=video_path,
         status="Submitted"
     )
 
@@ -215,6 +244,7 @@ async def create_incident_with_image(
     db.commit()
     db.refresh(new_incident)
 
+    
     # Community Validation
     distinct_users_count = (
         db.query(func.count(func.distinct(Incident.user_id)))

@@ -25,6 +25,8 @@ class IncidentResponse(BaseModel):
     description: str
     category: str | None
     area_name: str | None
+    image_url: str | None
+    video_url: str | None
     status: str
     priority_score: int | None
     priority_tier: str | None

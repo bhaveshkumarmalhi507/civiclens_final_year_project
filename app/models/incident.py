@@ -16,6 +16,7 @@ class Incident(Base):
     description = Column(Text, nullable=False)           # citizen ka text
     category = Column(String(50), nullable=True)         # road, fire, flood, crime etc.
     image_url = Column(String(255), nullable=True)
+    video_url = Column(String(255), nullable=True) 
 
     area_name = Column(String(150), nullable=True)        # Nominatim se aayega (FR-05)
     location = Column(Geometry(geometry_type="POINT", srid=4326), nullable=False)  # GPS point

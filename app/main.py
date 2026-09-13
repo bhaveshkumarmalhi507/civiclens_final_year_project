@@ -7,6 +7,7 @@ from app.routers.user import router as user_router
 from fastapi.security import OAuth2PasswordBearer
 from app.routers.incident import router as incident_router
 from app.firebase import firebase_config  # Ensure Firebase is initialized
+from fastapi.middleware.cors import CORSMiddleware
 from app.routers.admin import router as admin_router
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="users/login"
@@ -16,6 +17,13 @@ app = FastAPI(
     title="CivicLens API",
     description="AI-Powered Citizen Journalism & Smart City Alerts",
     version="1.0.0"
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Create tables
