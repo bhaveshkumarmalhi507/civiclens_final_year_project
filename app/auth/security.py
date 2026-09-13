@@ -52,3 +52,13 @@ def decode_access_token(token: str) -> dict:
         SECRET_KEY,
         algorithms=[ALGORITHM]
     )
+#=========================
+# Password Reset Token
+#=========================
+RESET_TOKEN_EXPIRE_MINUTES = 15
+
+def create_reset_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "type": "reset"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)

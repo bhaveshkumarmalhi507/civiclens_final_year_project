@@ -23,6 +23,17 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class ProfileUpdate(BaseModel):
+    full_name: str | None = None
+    phone: str | None = None
+    city: str | None = None
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str

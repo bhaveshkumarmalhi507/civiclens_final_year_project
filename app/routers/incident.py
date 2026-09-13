@@ -279,3 +279,25 @@ async def create_incident_with_image(
     })
 
     return new_incident
+#=========================
+# Incident Deletion (FR-12)
+#=========================
+@router.delete("/{incident_id}")
+def delete_incident(
+    incident_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    if incident.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to delete this report")
+
+    if incident.status != "Submitted" and current_user.role != "admin":
+        raise HTTPException(status_code=400, detail="Cannot cancel a report that is already being processed")
+
+    db.delete(incident)
+    db.commit()
+    return {"message": "Incident deleted successfully"}
