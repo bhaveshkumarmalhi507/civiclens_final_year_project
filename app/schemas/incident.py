@@ -25,6 +25,8 @@ class IncidentResponse(BaseModel):
     description: str
     category: str | None
     area_name: str | None
+    latitude: float | None
+    longitude: float | None
     image_url: str | None
     video_url: str | None
     status: str
@@ -38,3 +40,15 @@ class IncidentResponse(BaseModel):
 class StatusUpdate(BaseModel):
     new_status: str
     note: str | None = None
+
+class StatusHistoryResponse(BaseModel):
+    id: int
+    incident_id: int
+    old_status: str | None = None
+    new_status: str
+    changed_by: int
+    note: str | None = None
+    changed_at: datetime
+
+    class Config:
+        from_attributes = True

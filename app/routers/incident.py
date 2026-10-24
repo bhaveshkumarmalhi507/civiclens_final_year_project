@@ -6,11 +6,14 @@ from geoalchemy2.functions import ST_MakePoint, ST_SetSRID, ST_DWithin
 from typing import List
 from pydantic import BaseModel
 from app.services.priority_engine import calculate_priority_score
+from app.services.notification_service import notify_matching_users
+from app.services.validation_service import validate_and_rank
 
+from fastapi import Query
 from app.database.database import get_db
 from app.models.incident import Incident
 from app.models.user import User
-from app.schemas.incident import IncidentCreate, IncidentResponse, StatusUpdate
+from app.schemas.incident import IncidentCreate, IncidentResponse, StatusUpdate, StatusHistoryResponse
 from app.routers.user import get_current_user
 from app.utils.geocoding import get_area_name
 from app.models.status_history import StatusHistory
@@ -24,7 +27,9 @@ router = APIRouter(
     prefix="/incidents",
     tags=["Incidents"]
 )
-
+# =========================
+# Incident Creation & Listing
+# =========================
 @router.post("/", response_model=IncidentResponse)
 async def create_incident(
     incident: IncidentCreate,
@@ -46,58 +51,27 @@ async def create_incident(
     db.commit()
     db.refresh(new_incident)
 
+# Save initial status history
+    initial_history = StatusHistory(
+       incident_id=new_incident.id,
+       old_status=None,
+       new_status="Submitted",
+       changed_by=current_user.id,
+       note="Incident submitted"
+   )
+
+    db.add(initial_history)
+    db.commit()
+
+    
     # ===== Community Validation Check (FR-06) =====
-    distinct_users_count = (
-        db.query(func.count(func.distinct(Incident.user_id)))
-        .filter(
-            Incident.category == new_incident.category,
-            ST_DWithin(
-                cast(Incident.location, Geography),
-                cast(point, Geography),
-                500
-            )
-        )
-        .scalar()
-    )
+    validate_and_rank(db, new_incident, point)
+# Send notifications to users with matching preferences
+    try:
+        notify_matching_users(db, new_incident)
+    except Exception as e:
+      print(f"[Notification Error]: {e}")
 
-    if distinct_users_count >= 3:
-        matching_incidents = (
-            db.query(Incident)
-            .filter(
-                Incident.category == new_incident.category,
-                ST_DWithin(
-                    cast(Incident.location, Geography),
-                    cast(point, Geography),
-                    500
-                )
-            )
-            .all()
-        )
-
-        for inc in matching_incidents:
-            inc.status = "Verified"
-
-        db.commit()
-        db.refresh(new_incident)
-
-            # ===== Priority Score Calculate Karo (FR-07) =====
-        DUMMY_SEVERITY = 50   # TODO: Asadullah ka real NLP severity yahan aayega
-
-        score, tier = calculate_priority_score(
-            severity_score=DUMMY_SEVERITY,
-            area_report_count=len(matching_incidents),
-            confirmation_count=distinct_users_count,
-            created_at=new_incident.created_at
-        )
-
-        for inc in matching_incidents:
-            inc.priority_score = score
-            inc.priority_tier = tier
-
-        db.commit()
-        db.refresh(new_incident)
-        
-        # ===== Real-time Broadcast (FR-08) =====
     await manager.broadcast({
         "id": new_incident.id,
         "description": new_incident.description,
@@ -109,11 +83,43 @@ async def create_incident(
 
     return new_incident
 
+# =========================
+# Incident Listing
+# =========================
 
 @router.get("/", response_model=List[IncidentResponse])
-def list_incidents(db: Session = Depends(get_db)):
-    incidents = db.query(Incident).order_by(Incident.created_at.desc()).all()
-    return incidents
+def list_incidents(
+    category: str | None = None,
+    area: str | None = None,
+    priority: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Incident)
+
+    # Filter by incident category
+    if category:
+        query = query.filter(Incident.category == category)
+
+    # Filter by area name
+    if area:
+        query = query.filter(Incident.area_name.ilike(f"%{area}%"))
+
+    # Filter by priority tier
+    if priority:
+        query = query.filter(
+            Incident.priority_tier.ilike(priority)
+        )
+
+    # Highest priority first, newest reports first for ties
+    query = query.order_by(
+        Incident.priority_score.desc().nullslast(),
+        Incident.created_at.desc()
+    )
+
+    return query.offset(skip).limit(limit).all()
+
 
 #=========================
 #my-reports endpoint for users to see their own reports
@@ -132,6 +138,33 @@ def get_my_reports(
     return incidents
 
 #=========================
+# Incident Heatmap Data (FR-13)
+#=========================
+@router.get("/heatmap")
+def get_incident_heatmap(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    incidents = db.query(Incident).filter(
+        Incident.location.isnot(None)
+    ).all()
+
+    heatmap_data = []
+
+    for incident in incidents:
+        if incident.latitude is not None and incident.longitude is not None:
+            heatmap_data.append({
+                "id": incident.id,
+                "latitude": incident.latitude,
+                "longitude": incident.longitude,
+                "category": incident.category,
+                "priority": incident.priority_tier,
+                "status": incident.status
+            })
+
+    return heatmap_data
+
+#=========================
 # Incident Status Update & History
 #=========================
 @router.get("/{incident_id}", response_model=IncidentResponse)
@@ -140,6 +173,41 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     return incident
+
+#=========================
+# Incident Status History
+#=========================
+@router.get(
+    "/{incident_id}/history",
+    response_model=List[StatusHistoryResponse]
+)
+def get_incident_status_history(
+    incident_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Check whether the incident exists
+    incident = (
+        db.query(Incident)
+        .filter(Incident.id == incident_id)
+        .first()
+    )
+
+    if not incident:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found"
+        )
+
+    # Fetch status history from oldest to newest
+    history = (
+        db.query(StatusHistory)
+        .filter(StatusHistory.incident_id == incident_id)
+        .order_by(StatusHistory.changed_at.asc())
+        .all()
+    )
+
+    return history
 
 
 VALID_STATUSES = ["Submitted", "Under Review", "Verified", "In Progress", "Resolved"]
@@ -179,7 +247,9 @@ def update_status(
 
     return incident
 
-
+#=========================
+# WebSocket for Real-time Feed
+#=========================
 @router.websocket("/ws/feed")
 async def websocket_feed(websocket: WebSocket):
     await manager.connect(websocket)
@@ -191,11 +261,24 @@ async def websocket_feed(websocket: WebSocket):
 
 
 #==================
-# Incident Upload with Image
+# Incident Upload with Image/Video (FR-04)
 #==================
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+}
+
+ALLOWED_VIDEO_TYPES = {
+    "video/mp4",
+    "video/webm"
+}
+
+MAX_IMAGE_SIZE = 5 * 1024 * 1024    # 5 MB
+MAX_VIDEO_SIZE = 25 * 1024 * 1024  # 25 MB
 
 @router.post("/upload", response_model=IncidentResponse)
 async def create_incident_with_image(
@@ -210,6 +293,43 @@ async def create_incident_with_image(
 ):
     if not image and not video:
         raise HTTPException(status_code=400, detail="At least one of image or video is required")
+
+
+    # Validate image type and size
+    if image:
+        if image.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported image type. Use JPEG, PNG, or WEBP."
+            )
+
+        image.file.seek(0, 2)
+        image_size = image.file.tell()
+        image.file.seek(0)
+
+        if image_size > MAX_IMAGE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="Image size must not exceed 5 MB."
+            )
+
+    # Validate video type and size
+    if video:
+        if video.content_type not in ALLOWED_VIDEO_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported video type. Use MP4 or WEBM."
+            )
+
+        video.file.seek(0, 2)
+        video_size = video.file.tell()
+        video.file.seek(0)
+
+        if video_size > MAX_VIDEO_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="Video size must not exceed 25 MB."
+            )
 
     image_path = None
     video_path = None
@@ -244,30 +364,26 @@ async def create_incident_with_image(
     db.commit()
     db.refresh(new_incident)
 
-    
-    # Community Validation
-    distinct_users_count = (
-        db.query(func.count(func.distinct(Incident.user_id)))
-        .filter(
-            Incident.category == new_incident.category,
-            ST_DWithin(cast(Incident.location, Geography), cast(point, Geography), 500)
-        )
-        .scalar()
+    # Save initial status history for uploaded incident
+    initial_history = StatusHistory(
+        incident_id=new_incident.id,
+        old_status=None,
+        new_status="Submitted",
+        changed_by=current_user.id,
+        note="Incident submitted"
     )
 
-    if distinct_users_count >= 3:
-        matching_incidents = (
-            db.query(Incident)
-            .filter(
-                Incident.category == new_incident.category,
-                ST_DWithin(cast(Incident.location, Geography), cast(point, Geography), 500)
-            )
-            .all()
-        )
-        for inc in matching_incidents:
-            inc.status = "Verified"
-        db.commit()
-        db.refresh(new_incident)
+    db.add(initial_history)
+    db.commit()
+
+    # Community Validation + Priority Score + BREAKING notification
+    validate_and_rank(db, new_incident, point)
+   
+    # Send notifications to users with matching preferences
+    try:
+        notify_matching_users(db, new_incident)
+    except Exception as e:
+       print(f"[Notification Error]: {e}")
 
     await manager.broadcast({
         "id": new_incident.id,

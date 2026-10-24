@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from geoalchemy2 import Geometry
 from datetime import datetime
+from geoalchemy2.shape import to_shape
 
 from app.database.database import Base
 
@@ -31,3 +32,11 @@ class Incident(Base):
 
     ai_confidence = Column(Integer, nullable=True)   # 0-100, AI se aayega
     is_flagged = Column(Boolean, default=False)      # low confidence par True ho jayega
+
+    @property
+    def latitude(self):
+        return to_shape(self.location).y if self.location is not None else None
+
+    @property
+    def longitude(self):
+        return to_shape(self.location).x if self.location is not None else None
